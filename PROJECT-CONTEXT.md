@@ -56,6 +56,7 @@ O projeto já possui um setup mínimo rodável na Godot:
 - descarte automático ao encostar na lixeira implementado
 - acerto concede moedas e aumenta sustentabilidade
 - erro gera feedback negativo leve e mantém o item para nova tentativa
+- `README.md` criado com dependências e instruções genéricas para clonar, abrir e rodar o projeto localmente
 
 Esta versão existe apenas para validar que o projeto abre, executa e mostra algo localmente. Os visuais são placeholders e devem ser substituídos por pixel art nas próximas fases.
 

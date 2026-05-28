@@ -3,6 +3,9 @@ extends Node2D
 const PLAYER_SCENE := preload("res://player/Player.tscn")
 const WASTE_ITEM_SCENE := preload("res://items/WasteItem.tscn")
 const RECYCLE_BIN_SCENE := preload("res://items/RecycleBin.tscn")
+const TREE_TEXTURE := preload("res://textures/environment/tree.png")
+const BUILDING_FLOOR := preload("res://textures/tilesets/building_floor.png")
+const _Sprites := preload("res://scripts/sprites.gd")
 const WORLD_SIZE := Vector2(1600, 1000)
 const COLLISION_LAYER_WORLD := 1
 const CORRECT_DISCARD_COINS := 10
@@ -25,13 +28,13 @@ var building_rects: Array[Rect2] = [
 ]
 
 var tree_positions: Array[Vector2] = [
-	Vector2(180, 160),
-	Vector2(310, 220),
-	Vector2(1240, 180),
-	Vector2(1380, 280),
-	Vector2(260, 760),
-	Vector2(1180, 780),
-	Vector2(1420, 840),
+	Vector2(68, 130),    # esquerda do prédio 1
+	Vector2(290, 55),    # acima do prédio 1
+	Vector2(1160, 50),   # acima do prédio 2
+	Vector2(1450, 200),  # direita do prédio 2
+	Vector2(1370, 760),  # direita do prédio 3
+	Vector2(90, 740),    # esquerda do prédio 4
+	Vector2(290, 895),   # abaixo do prédio 4
 ]
 
 var waste_positions: Array[Dictionary] = [
@@ -65,7 +68,6 @@ func _ready() -> void:
 func _draw() -> void:
 	_draw_map()
 	_draw_trees()
-	_draw_recycle_bins()
 
 
 func _ensure_input_actions() -> void:
@@ -117,6 +119,7 @@ func _spawn_recycle_bins() -> void:
 		recycle_bin.position = bin["position"]
 		recycle_bin.bin_type = bin["type"]
 		recycle_bin.display_name = bin["name"]
+		recycle_bin.display_color = bin["color"]
 		recycle_bin.discard_requested.connect(_on_discard_requested)
 		bin_root.add_child(recycle_bin)
 
@@ -244,34 +247,81 @@ func _on_discard_requested(recycle_bin: Node) -> void:
 
 
 func _draw_map() -> void:
-	draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color("#a8d977"))
-	draw_rect(Rect2(Vector2(0, 400), Vector2(WORLD_SIZE.x, 150)), Color("#8b8b7a"))
-	draw_rect(Rect2(Vector2(690, 0), Vector2(170, WORLD_SIZE.y)), Color("#8b8b7a"))
-	draw_rect(Rect2(Vector2(0, 380), Vector2(WORLD_SIZE.x, 20)), Color("#d8c89a"))
-	draw_rect(Rect2(Vector2(0, 550), Vector2(WORLD_SIZE.x, 20)), Color("#d8c89a"))
-	draw_rect(Rect2(Vector2(670, 0), Vector2(20, WORLD_SIZE.y)), Color("#d8c89a"))
-	draw_rect(Rect2(Vector2(860, 0), Vector2(20, WORLD_SIZE.y)), Color("#d8c89a"))
-	draw_rect(building_rects[0], Color("#e7cf9c"))
-	draw_rect(building_rects[1], Color("#cfe5f4"))
-	draw_rect(building_rects[2], Color("#f1d58f"))
-	draw_rect(building_rects[3], Color("#b9d8a8"))
+	# Tiled grass ground
+	draw_texture_rect(_Sprites.grass_tile(), Rect2(Vector2.ZERO, WORLD_SIZE), true)
 
-	for rect in building_rects:
-		draw_rect(rect, Color("#8a7b5f"), false, 4.0)
+	# Horizontal road (tiled dirt)
+	draw_texture_rect(_Sprites.dirt_tile(), Rect2(Vector2(0, 400), Vector2(WORLD_SIZE.x, 150)), true)
+	# Vertical road (tiled dirt)
+	draw_texture_rect(_Sprites.dirt_tile(), Rect2(Vector2(690, 0), Vector2(170, WORLD_SIZE.y)), true)
+
+	# Road borders
+	draw_rect(Rect2(Vector2(0, 396), Vector2(WORLD_SIZE.x, 5)), Color("#907020"))
+	draw_rect(Rect2(Vector2(0, 549), Vector2(WORLD_SIZE.x, 5)), Color("#907020"))
+	draw_rect(Rect2(Vector2(686, 0), Vector2(5, WORLD_SIZE.y)), Color("#907020"))
+	draw_rect(Rect2(Vector2(859, 0), Vector2(5, WORLD_SIZE.y)), Color("#907020"))
+
+	# Road center dashes
+	var dash := 36.0
+	var gap := 18.0
+	var cx := 0.0
+	while cx < WORLD_SIZE.x:
+		if not (cx > 670.0 and cx < 880.0):
+			draw_rect(Rect2(cx, 471.0, dash, 5.0), Color("#d4b03a", 0.65))
+		cx += dash + gap
+	var cy := 0.0
+	while cy < WORLD_SIZE.y:
+		if not (cy > 380.0 and cy < 570.0):
+			draw_rect(Rect2(771.0, cy, 5.0, dash), Color("#d4b03a", 0.65))
+		cy += dash + gap
+
+	# Buildings
+	_draw_building(building_rects[0], Color("#e8c88a"), Color("#c8a860"))
+	_draw_building(building_rects[1], Color("#c4dcf0"), Color("#9abce0"))
+	_draw_building(building_rects[2], Color("#f0d068"), Color("#d0b048"))
+	_draw_building(building_rects[3], Color("#b4d890"), Color("#8ab868"))
+
+
+func _draw_building(rect: Rect2, wall: Color, roof: Color) -> void:
+	# Wood floor tiled, tinted with the building's wall color
+	draw_texture_rect(BUILDING_FLOOR, rect, true, wall)
+	# Roof strip
+	draw_rect(Rect2(rect.position, Vector2(rect.size.x, 14)), roof)
+	# Left highlight strip
+	draw_rect(Rect2(rect.position + Vector2(0, 14), Vector2(6, rect.size.y - 14)), wall.lightened(0.18))
+	# Outline (pixel-crisp: 4 filled rects instead of unfilled rect with width)
+	draw_rect(Rect2(rect.position,                               Vector2(rect.size.x, 3)),     Color("#6a5030"))
+	draw_rect(Rect2(rect.position + Vector2(0, rect.size.y - 3),Vector2(rect.size.x, 3)),     Color("#6a5030"))
+	draw_rect(Rect2(rect.position,                               Vector2(3, rect.size.y)),     Color("#6a5030"))
+	draw_rect(Rect2(rect.position + Vector2(rect.size.x - 3, 0),Vector2(3, rect.size.y)),     Color("#6a5030"))
+
+	# Two windows (pixel-crisp: draw_rect instead of draw_line for cross-bars)
+	for wi in range(2):
+		var wx := int(rect.position.x + rect.size.x * (0.18 + wi * 0.46))
+		var wy := int(rect.position.y + 22.0)
+		draw_rect(Rect2(wx, wy, 30, 24), Color("#80c4e0"))
+		draw_rect(Rect2(wx,      wy,      30, 2),  Color("#6a5030"))
+		draw_rect(Rect2(wx,      wy + 22, 30, 2),  Color("#6a5030"))
+		draw_rect(Rect2(wx,      wy,       2, 24), Color("#6a5030"))
+		draw_rect(Rect2(wx + 28, wy,       2, 24), Color("#6a5030"))
+		draw_rect(Rect2(wx + 14, wy,       2, 24), Color("#6a5030"))
+		draw_rect(Rect2(wx,      wy + 11, 30,  2), Color("#6a5030"))
+
+	# Door (pixel-crisp outline)
+	var dx := int(rect.position.x + rect.size.x * 0.44)
+	var dy := int(rect.position.y + rect.size.y - 52.0)
+	draw_rect(Rect2(dx, dy, 26, 52), Color("#8a5a28"))
+	draw_rect(Rect2(dx,      dy,      26, 2),  Color("#6a5030"))
+	draw_rect(Rect2(dx,      dy + 50, 26, 2),  Color("#6a5030"))
+	draw_rect(Rect2(dx,      dy,       2, 52), Color("#6a5030"))
+	draw_rect(Rect2(dx + 24, dy,       2, 52), Color("#6a5030"))
+	draw_rect(Rect2(dx + 18, dy + 28,  4,  4), Color("#c8a030"))
 
 
 func _draw_trees() -> void:
-	for tree_position in tree_positions:
-		draw_rect(Rect2(tree_position + Vector2(-6, 12), Vector2(12, 24)), Color("#8a613f"))
-		draw_circle(tree_position, 28, Color("#4e9c58"))
-		draw_circle(tree_position + Vector2(-14, 10), 20, Color("#65b96a"))
-		draw_circle(tree_position + Vector2(16, 8), 20, Color("#73c477"))
-
-
-func _draw_recycle_bins() -> void:
-	for bin in bin_data:
-		var position: Vector2 = bin["position"]
-		var color: Color = bin["color"]
-		draw_rect(Rect2(position, Vector2(38, 48)), Color("#31413a"))
-		draw_rect(Rect2(position + Vector2(4, 8), Vector2(30, 34)), color)
-		draw_rect(Rect2(position + Vector2(-2, 0), Vector2(42, 8)), Color("#26342e"))
+	for tree_pos in tree_positions:
+		draw_texture_rect_region(
+			TREE_TEXTURE,
+			Rect2(tree_pos + Vector2(-64, -80), Vector2(128, 96)),
+			Rect2(0, 0, 64, 48)
+		)

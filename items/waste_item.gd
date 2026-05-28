@@ -1,5 +1,7 @@
 extends Area2D
 
+const _Sprites := preload("res://scripts/sprites.gd")
+
 signal picked_up(waste_item: Node)
 
 @export var waste_type := "plastic"
@@ -11,13 +13,11 @@ func _ready() -> void:
 	collision_layer = 4
 	collision_mask = 2
 	body_entered.connect(_on_body_entered)
-	queue_redraw()
 
-
-func _draw() -> void:
-	draw_circle(Vector2.ZERO, 11, Color("#344034"))
-	draw_circle(Vector2(0, -2), 8, display_color)
-	draw_arc(Vector2.ZERO, 16, 0.0, TAU, 18, Color("#eef4df"), 2.0)
+	var sprite := Sprite2D.new()
+	sprite.texture = _Sprites.waste_gem()
+	sprite.modulate = display_color
+	add_child(sprite)
 
 
 func _on_body_entered(body: Node2D) -> void:

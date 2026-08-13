@@ -24,7 +24,7 @@ Audio="*res://systems/audio.gd"
 window/size/viewport_width=1600
 window/size/viewport_height=1000
 window/stretch/mode="viewport"
-window/stretch/aspect="keep"
+window/stretch/aspect="expand"
 window/size/resizable=true
 
 [rendering]

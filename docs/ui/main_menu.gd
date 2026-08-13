@@ -48,6 +48,11 @@ var _gems := [
 
 var _time := 0.0
 
+# Dimensoes reais do controle (preenchem a janela) e escala de posicao em X.
+var _w := WORLD.x
+var _h := WORLD.y
+var _sx := 1.0
+
 
 func _ready() -> void:
 	_build_ui()
@@ -64,6 +69,9 @@ func _process(delta: float) -> void:
 # --------------------------------------------------------------------------- #
 
 func _draw() -> void:
+	_w = maxf(size.x, WORLD.x)
+	_h = maxf(size.y, WORLD.y)
+	_sx = _w / WORLD.x
 	_draw_sky()
 	_draw_sun()
 	_draw_clouds()
@@ -88,11 +96,11 @@ func _draw_sky() -> void:
 	var band_h := GROUND_Y / float(bands)
 	for i in bands:
 		var t := i / float(bands - 1)
-		draw_rect(Rect2(0, i * band_h, WORLD.x, band_h + 1.0), sky_top.lerp(sky_horizon, t))
+		draw_rect(Rect2(0, i * band_h, _w, band_h + 1.0), sky_top.lerp(sky_horizon, t))
 
 
 func _draw_sun() -> void:
-	var sun_pos := Vector2(1340, 150)
+	var sun_pos := Vector2(_w * 0.84, 150)
 	var pulse := 0.5 + 0.5 * sin(_time * 1.4)
 	draw_circle(sun_pos, 116 + pulse * 12.0, Color(1.0, 0.95, 0.72, 0.14))
 	draw_circle(sun_pos, 90, Color(1.0, 0.96, 0.78, 0.30))
@@ -100,13 +108,13 @@ func _draw_sun() -> void:
 
 
 func _draw_clouds() -> void:
-	_draw_cloud(Vector2(300, 130), 1.0, 10.0)
-	_draw_cloud(Vector2(820, 90), 0.8, 6.0)
-	_draw_cloud(Vector2(1180, 200), 1.15, 14.0)
+	_draw_cloud(Vector2(300 * _sx, 130), 1.0, 10.0)
+	_draw_cloud(Vector2(820 * _sx, 90), 0.8, 6.0)
+	_draw_cloud(Vector2(1180 * _sx, 200), 1.15, 14.0)
 
 
 func _draw_cloud(center: Vector2, s: float, speed: float) -> void:
-	var drift := fmod(_time * speed, WORLD.x + 400.0) - 200.0
+	var drift := fmod(_time * speed, _w + 400.0) - 200.0
 	var c := Vector2(center.x + drift, center.y)
 	var white := Color(1, 1, 1, 0.9)
 	draw_circle(c + Vector2(-46, 6) * s, 30 * s, white)
@@ -118,47 +126,48 @@ func _draw_cloud(center: Vector2, s: float, speed: float) -> void:
 func _draw_back_hill() -> void:
 	var pts := PackedVector2Array()
 	var x := 0.0
-	while x <= WORLD.x:
+	while x <= _w:
 		pts.append(Vector2(x, 512.0 + sin(x * 0.0075 + 1.2) * 24.0))
 		x += 40.0
-	pts.append(Vector2(WORLD.x, GROUND_Y + 8.0))
+	pts.append(Vector2(_w, GROUND_Y + 8.0))
 	pts.append(Vector2(0, GROUND_Y + 8.0))
 	draw_colored_polygon(pts, Color("#b7dd8b"))
 
 
 func _draw_ground() -> void:
-	draw_texture_rect(_Sprites.grass_tile(), Rect2(0, GROUND_Y, WORLD.x, WORLD.y - GROUND_Y), true)
+	draw_texture_rect(_Sprites.grass_tile(), Rect2(0, GROUND_Y, _w, _h - GROUND_Y), true)
 	# Linha de horizonte suave.
-	draw_rect(Rect2(0, GROUND_Y - 3.0, WORLD.x, 3.0), Color("#8fbf62"))
-	draw_rect(Rect2(0, GROUND_Y, WORLD.x, 3.0), Color("#5f8c38"))
+	draw_rect(Rect2(0, GROUND_Y - 3.0, _w, 3.0), Color("#8fbf62"))
+	draw_rect(Rect2(0, GROUND_Y, _w, 3.0), Color("#5f8c38"))
 
 
 func _draw_path() -> void:
 	# Caminho de terra em perspectiva, guiando o olhar para o horizonte.
+	var cx := _w * 0.5
 	var top := GROUND_Y + 6.0
 	var pts := PackedVector2Array([
-		Vector2(700, WORLD.y), Vector2(900, WORLD.y),
-		Vector2(838, top), Vector2(762, top),
+		Vector2(cx - 100, _h), Vector2(cx + 100, _h),
+		Vector2(cx + 38, top), Vector2(cx - 38, top),
 	])
 	draw_colored_polygon(pts, Color("#c9a05c"))
 	# Bordas.
-	draw_line(Vector2(700, WORLD.y), Vector2(762, top), Color("#a67f42"), 4.0)
-	draw_line(Vector2(900, WORLD.y), Vector2(838, top), Color("#a67f42"), 4.0)
+	draw_line(Vector2(cx - 100, _h), Vector2(cx - 38, top), Color("#a67f42"), 4.0)
+	draw_line(Vector2(cx + 100, _h), Vector2(cx + 38, top), Color("#a67f42"), 4.0)
 	# Tracejado central.
 	var steps := 7
 	for i in steps:
 		var t := i / float(steps)
 		var w: float = lerp(70.0, 6.0, t)
-		var y: float = lerp(WORLD.y - 20.0, top + 10.0, t)
+		var y: float = lerp(_h - 20.0, top + 10.0, t)
 		var dash_h: float = lerp(26.0, 6.0, t)
-		draw_rect(Rect2(800 - w * 0.06, y, max(6.0, w * 0.12), dash_h), Color("#e6c877", 0.7))
+		draw_rect(Rect2(cx - w * 0.06, y, max(6.0, w * 0.12), dash_h), Color("#e6c877", 0.7))
 
 
 func _draw_house(house: Dictionary) -> void:
 	var w: float = house["w"]
 	var h: float = house["h"]
-	var base_y := 604.0
-	var x: float = house["x"]
+	var base_y := GROUND_Y + 44.0
+	var x: float = house["x"] * _sx
 	var top := base_y - h
 	var wall: Color = house["wall"]
 	var roof: Color = house["roof"]
@@ -182,6 +191,7 @@ func _draw_house(house: Dictionary) -> void:
 
 func _draw_tree(tree: Dictionary) -> void:
 	var base: Vector2 = tree["base"]
+	base.x *= _sx
 	var size: Vector2 = tree["size"]
 	draw_texture_rect_region(
 		TREE_TEXTURE,
@@ -193,8 +203,8 @@ func _draw_tree(tree: Dictionary) -> void:
 func _draw_bin(bin: Dictionary) -> void:
 	var tex := _Sprites.recycle_bin()
 	var size := Vector2(86, 108)
-	var base_y := 906.0
-	var x: float = bin["x"]
+	var base_y := _h - 94.0
+	var x: float = bin["x"] * _sx
 	var rect := Rect2(Vector2(x, base_y - size.y), size)
 	# Sombra.
 	draw_circle(Vector2(x + size.x * 0.5, base_y), 34, Color(0, 0, 0, 0.10))
@@ -205,9 +215,9 @@ func _draw_cat() -> void:
 	var tex := _Sprites.cat()
 	var size := Vector2(176, 176)
 	var bob := sin(_time * 2.0) * 6.0
-	var base := Vector2(720, 912 + bob)
+	var base := Vector2(720 * _sx, (_h - 88.0) + bob)
 	# Sombra.
-	draw_circle(Vector2(base.x, 916), 60, Color(0, 0, 0, 0.12))
+	draw_circle(Vector2(base.x, _h - 84.0), 60, Color(0, 0, 0, 0.12))
 	draw_texture_rect(tex, Rect2(base - Vector2(size.x * 0.5, size.y), size), false)
 
 
@@ -215,6 +225,7 @@ func _draw_gem(gem: Dictionary) -> void:
 	var tex := _Sprites.waste_gem()
 	var size := Vector2(46, 46)
 	var pos: Vector2 = gem["pos"]
+	pos.x *= _sx
 	var bob := sin(_time * 2.2 + gem["phase"]) * 10.0
 	var center := Vector2(pos.x, pos.y + bob)
 	# Brilho.

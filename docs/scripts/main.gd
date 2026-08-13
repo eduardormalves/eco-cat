@@ -1714,7 +1714,9 @@ func _draw() -> void:
 
 func _draw_ground() -> void:
 	var tint: Color = _theme.get("grass", Color(1, 1, 1))
-	draw_texture_rect(_Sprites.grass_tile(), Rect2(Vector2.ZERO, WORLD_SIZE), true, tint)
+	# Grama estendida bem alem do mapa: com a tela cheia (aspect expand) a
+	# camera pode mostrar as bordas, entao a cidade fica cercada de campo.
+	draw_texture_rect(_Sprites.grass_tile(), Rect2(-1000, -700, WORLD_SIZE.x + 2000, WORLD_SIZE.y + 1400), true, tint)
 
 
 func _draw_decor() -> void:

@@ -5,6 +5,10 @@ const _Sprites := preload("res://scripts/sprites.gd")
 @export var speed := 190.0
 @export var movement_bounds := Rect2(Vector2(40, 40), Vector2(1520, 920))
 
+## Direcao pedida pelo controle de toque (celular). Preenchida por main.gd;
+## fica em zero quando o jogo roda no teclado.
+var touch_direction := Vector2.ZERO
+
 var _sprite: Sprite2D
 var _anim_t := 0.0
 
@@ -21,6 +25,8 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	var direction := Input.get_vector("move_left", "move_right", "move_up", "move_down")
+	if direction == Vector2.ZERO:
+		direction = touch_direction
 	velocity = direction * speed
 	move_and_slide()
 

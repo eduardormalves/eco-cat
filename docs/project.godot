@@ -30,3 +30,6 @@ window/size/resizable=true
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
+; Fundo do motor: verde de grama em vez do cinza padrao (0.3,0.3,0.3), para que
+; nenhuma borda cinza apareca em telas com proporcao diferente da base 1600x1000.
+environment/defaults/default_clear_color=Color(0.3019608, 0.54901963, 0.15686275, 1)

@@ -10,6 +10,7 @@ extends Control
 const MAIN_SCENE := "res://scenes/Main.tscn"
 
 const _Sprites := preload("res://scripts/sprites.gd")
+const TOUCH_CONTROLS_SCRIPT := preload("res://ui/touch_controls.gd")
 const TREE_TEXTURE := preload("res://textures/environment/tree.png")
 
 const WORLD := Vector2(1600, 1000)
@@ -47,6 +48,7 @@ var _gems := [
 ]
 
 var _time := 0.0
+var _touch := false
 
 # Dimensoes reais do controle (preenchem a janela) e escala de posicao em X.
 var _w := WORLD.x
@@ -55,6 +57,7 @@ var _sx := 1.0
 
 
 func _ready() -> void:
+	_touch = TOUCH_CONTROLS_SCRIPT.is_available()
 	_build_ui()
 	queue_redraw()
 
@@ -299,14 +302,17 @@ func _build_ui() -> void:
 
 	# Dica no rodape.
 	var hint := Label.new()
-	hint.text = "Mover: WASD ou setas   •   ESC volta para este menu"
+	if _touch:
+		hint.text = "Use o manche na tela para mover o gato"
+	else:
+		hint.text = "Mover: WASD ou setas   •   ESC volta para este menu"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_color_override("font_color", Color("#33502f"))
 	hint.add_theme_color_override("font_shadow_color", Color(1, 1, 1, 0.6))
-	hint.add_theme_font_size_override("font_size", 18)
+	hint.add_theme_font_size_override("font_size", 34 if _touch else 18)
 	hint.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	hint.offset_bottom = -22
-	hint.offset_top = -52
+	hint.offset_top = -74 if _touch else -52
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(hint)
 
@@ -329,9 +335,10 @@ func _card_style() -> StyleBoxFlat:
 func _make_button(text: String) -> Button:
 	var button := Button.new()
 	button.text = text
-	button.custom_minimum_size = Vector2(340, 66)
+	# No celular os botoes precisam ser bem maiores para serem tocaveis.
+	button.custom_minimum_size = Vector2(700, 130) if _touch else Vector2(340, 66)
 	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	button.add_theme_font_size_override("font_size", 28)
+	button.add_theme_font_size_override("font_size", 48 if _touch else 28)
 	button.add_theme_color_override("font_color", Color("#2c451f"))
 	button.add_theme_color_override("font_hover_color", Color("#1c3014"))
 	button.add_theme_color_override("font_pressed_color", Color("#1c3014"))

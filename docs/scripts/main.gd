@@ -9,6 +9,8 @@ const BUILDING_FLOOR := preload("res://textures/tilesets/building_floor.png")
 const _Sprites := preload("res://scripts/sprites.gd")
 
 const WORLD_SIZE := Vector2(1600, 1000)
+# Quanto a grama passa das bordas do mapa (cobre qualquer proporcao de tela).
+const GROUND_MARGIN := 4000.0
 const COLLISION_LAYER_WORLD := 1
 const BASE_DISCARD_COINS := 10
 const CORRECT_DISCARD_SUSTAINABILITY := 4
@@ -122,11 +124,17 @@ var _pause_layer: CanvasLayer
 var _guide_layer: CanvasLayer
 var _mute_button: Button
 const MAP_VIEW_SCRIPT := preload("res://ui/map_view.gd")
+const TOUCH_CONTROLS_SCRIPT := preload("res://ui/touch_controls.gd")
 var _minimap_layer: CanvasLayer
 var _minimap_coins_label: Label
 var _map_view                      # instancia de ui/map_view.gd (dinamico)
 var _minimap_footer: Label
 var _minimap_close_button: Button
+
+# --- Controles de toque (so existem quando o jogo abre num aparelho de toque) - #
+var _touch_layer: CanvasLayer
+var _touch_controls                # instancia de ui/touch_controls.gd (dinamico)
+var _hint_label: Label
 
 
 func _ready() -> void:
@@ -134,6 +142,7 @@ func _ready() -> void:
 	_phases = _build_phases()
 	_apply_saved_state()
 	_create_hud()
+	_create_touch_controls()
 	_create_shop()
 	_create_pause_menu()
 	_create_guide()
@@ -146,6 +155,8 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_accrue_passive(delta)
+	if _touch_controls != null and is_instance_valid(player):
+		player.touch_direction = _touch_controls.direction
 	if _phase_complete or _shop_open or _paused or _guide_open or _minimap_open:
 		return
 	_process_belt(delta)
@@ -797,13 +808,19 @@ func _create_hud() -> void:
 	shop_button.pressed.connect(_toggle_shop)
 	column.add_child(shop_button)
 
-	var hint := _hud_label(16, Color("#20301f"))
-	hint.text = "WASD: mover  •  L: Startup  •  G: Guia  •  M: Mapa  •  ESC: Pausa"
-	hint.add_theme_color_override("font_shadow_color", Color(1, 1, 1, 0.7))
-	hint.add_theme_constant_override("shadow_offset_x", 1)
-	hint.add_theme_constant_override("shadow_offset_y", 1)
-	hint.position = Vector2(24, WORLD_SIZE.y - 40)
-	_hud_layer.add_child(hint)
+	_hint_label = _hud_label(16, Color("#20301f"))
+	_hint_label.text = "WASD: mover  •  L: Startup  •  G: Guia  •  M: Mapa  •  ESC: Pausa"
+	_hint_label.add_theme_color_override("font_shadow_color", Color(1, 1, 1, 0.7))
+	_hint_label.add_theme_constant_override("shadow_offset_x", 1)
+	_hint_label.add_theme_constant_override("shadow_offset_y", 1)
+	# Ancorado no rodape: em tela de celular o viewport e bem mais alto que 1000.
+	_hint_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	_hint_label.offset_left = 24
+	_hint_label.offset_right = 924
+	_hint_label.offset_top = -44
+	_hint_label.offset_bottom = -16
+	_hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud_layer.add_child(_hint_label)
 
 	_sacola_label = Label.new()
 	_sacola_label.add_theme_font_size_override("font_size", 18)
@@ -814,6 +831,32 @@ func _create_hud() -> void:
 	add_child(_sacola_label)
 
 	_create_transition_and_banner()
+
+
+func _create_touch_controls() -> void:
+	if not TOUCH_CONTROLS_SCRIPT.is_available():
+		return
+
+	_touch_layer = CanvasLayer.new()
+	_touch_layer.name = "TouchControls"
+	_touch_layer.layer = 2   # acima do HUD, abaixo da loja/pausa/guia/mapa
+	add_child(_touch_layer)
+
+	_touch_controls = Control.new()
+	_touch_controls.set_script(TOUCH_CONTROLS_SCRIPT)
+	_touch_layer.add_child(_touch_controls)
+	_touch_controls.connect("guide_pressed", _toggle_guide)
+	_touch_controls.connect("map_pressed", _toggle_minimap)
+	_touch_controls.connect("pause_pressed", _touch_pause)
+
+	# Sem teclado a dica de teclas so atrapalha (e fica embaixo do manche).
+	if _hint_label != null:
+		_hint_label.visible = false
+
+
+func _touch_pause() -> void:
+	if not _paused and not _shop_open and not _guide_open and not _minimap_open and not _phase_complete:
+		_open_pause()
 
 
 func _update_sacola_label() -> void:
@@ -1090,6 +1133,11 @@ func _close_shop() -> void:
 func _set_gameplay_active(value: bool) -> void:
 	if is_instance_valid(player):
 		player.set_physics_process(value)
+		if not value:
+			player.touch_direction = Vector2.ZERO
+	if _touch_layer != null:
+		_touch_layer.visible = value
+		_touch_controls.release()
 	if _collector_node != null and is_instance_valid(_collector_node):
 		_collector_node.set("active", value)
 
@@ -1386,6 +1434,18 @@ func _create_guide() -> void:
 	hint.add_theme_font_size_override("font_size", 18)
 	hint.add_theme_color_override("font_color", Color("#6f8a5a"))
 	column.add_child(hint)
+
+	# Botao de fechar: no celular nao ha tecla G nem ESC.
+	var close_button := Button.new()
+	close_button.text = "Fechar"
+	close_button.custom_minimum_size = Vector2(0, 46)
+	close_button.add_theme_font_size_override("font_size", 22)
+	close_button.add_theme_color_override("font_color", Color("#2c451f"))
+	close_button.add_theme_stylebox_override("normal", _button_style(Color("#e0c58a")))
+	close_button.add_theme_stylebox_override("hover", _button_style(Color("#eed6a0")))
+	close_button.add_theme_stylebox_override("pressed", _button_style(Color("#d0b478")))
+	close_button.pressed.connect(_close_guide)
+	column.add_child(close_button)
 
 
 func _toggle_guide() -> void:
@@ -1714,9 +1774,10 @@ func _draw() -> void:
 
 func _draw_ground() -> void:
 	var tint: Color = _theme.get("grass", Color(1, 1, 1))
-	# Grama estendida bem alem do mapa: com a tela cheia (aspect expand) a
-	# camera pode mostrar as bordas, entao a cidade fica cercada de campo.
-	draw_texture_rect(_Sprites.grass_tile(), Rect2(-1000, -700, WORLD_SIZE.x + 2000, WORLD_SIZE.y + 1400), true, tint)
+	# Grama estendida bem alem do mapa: com a tela cheia (aspect expand) a camera
+	# enxerga fora da cidade em telas de proporcao extrema (celular em pe, monitor
+	# ultrawide). Ali tem que haver campo, nunca o fundo do motor.
+	draw_texture_rect(_Sprites.grass_tile(), Rect2(Vector2.ZERO, WORLD_SIZE).grow(GROUND_MARGIN), true, tint)
 
 
 func _draw_decor() -> void:

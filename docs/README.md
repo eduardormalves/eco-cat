@@ -65,8 +65,20 @@ No Windows, se o comando `godot` nao existir, use o caminho completo do executav
 ## Controles
 
 - `WASD` ou setas: mover o EcoCat
-- Encostar em um residuo colorido: coletar
-- Encostar na lixeira correspondente: descartar
+- Encostar em um residuo: coletar (os residuos aparecem como o objeto real: garrafa PET, jornal, lata...)
+- `Q`, `Tab` ou `1`-`6`: escolher o item "na mao" (ou clicar/tocar no espaco da bolsa no HUD)
+- `E` ou `Espaco` perto de uma lixeira: descartar o item na mao
+- No celular: botoes `Descartar` e `Trocar` na tela
+
+## Licenca Ambiental (como perder)
+
+Nas Fases 1 e 2 de cada cidade (antes de fundar a startup) o gato esta tirando a
+Licenca Ambiental: cada descarte na lixeira errada gasta uma das 3 chances (folhas no HUD).
+No 3o erro a licenca e negada, o bairro fica contaminado e a fase recomeca do zero, com
+moedas e compras de volta ao que eram no inicio dela. A tela de derrota mostra cada erro
+e a lixeira certa. Ao concluir a Fase 2 a licenca e aprovada e a startup e liberada; dali
+em diante um erro so zera o combo. A partir da Fase 2 aparecem pegadinhas (caixa de pizza
+engordurada, espelho, cupom fiscal) que parecem reciclaveis mas vao no rejeito.
 
 ## Estado Atual do Prototipo
 

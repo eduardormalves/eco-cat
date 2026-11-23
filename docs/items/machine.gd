@@ -54,12 +54,7 @@ func _physics_process(delta: float) -> void:
 	if _target != null and is_instance_valid(_target):
 		if _step_to((_target as Node2D).position, delta):
 			if is_instance_valid(_target):
-				_carry = {
-					"type": _target.get("waste_type"),
-					"name": _target.get("display_name"),
-					"color": _target.get("display_color"),
-					"value": int(_target.get("value")),
-				}
+				_carry = _target.call("to_item")
 				_target.queue_free()
 			_target = null
 			queue_redraw()

@@ -303,9 +303,9 @@ func _build_ui() -> void:
 	# Dica no rodape.
 	var hint := Label.new()
 	if _touch:
-		hint.text = "Use o manche na tela para mover o gato"
+		hint.text = "Manche: mover   •   Descartar: perto da lixeira certa"
 	else:
-		hint.text = "Mover: WASD ou setas   •   ESC volta para este menu"
+		hint.text = "Mover: WASD ou setas   •   Descartar: E perto da lixeira   •   Escolher item: Q"
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint.add_theme_color_override("font_color", Color("#33502f"))
 	hint.add_theme_color_override("font_shadow_color", Color(1, 1, 1, 0.6))

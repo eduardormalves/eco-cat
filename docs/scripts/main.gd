@@ -21,6 +21,11 @@ const MAX_BAG := 6
 const MAX_SHOE := 6
 const MAX_AUTO := 4
 const AUTO_UNLOCK_PHASE := 2  # automacao/startup passa a ser vendida na Fase 3
+# Licenca Ambiental: antes de fundar a startup (Fases 1 e 2) o gato esta em
+# periodo de teste. MAX_STRIKES descartes errados no mesmo bairro = derrota.
+const MAX_STRIKES := 3
+const DISCARD_COOLDOWN := 0.3        # evita gastar duas chances num toque duplo
+const BIN_CENTER := Vector2(19, 24)  # centro da area da lixeira (sprite nao centralizado)
 
 # Cada CIDADE tem as 6 fases (bairros). Zerar as 6 = fundar a startup daquela
 # cidade -> abre o minimapa para escolher outra cidade e recomecar do zero.
@@ -47,6 +52,17 @@ var coins := 0
 var sustainability := 0
 var phase_index := 0
 var _combo := 0
+var _hand := 0                    # indice do item "na mao" dentro da bolsa
+
+# Licenca Ambiental (Fases 1 e 2, antes de fundar a startup)
+var _strikes := 0
+var _mistakes: Array = []         # [{item, bin_type}] para a tela de derrota
+var _game_over := false
+var _attempt_start := {}          # moedas/bolsa/calcado no inicio do bairro
+var _attempt_passive := 0         # renda passiva recebida durante a tentativa
+var _bins: Array = []
+var _near_bin: Node = null
+var _discard_cd := 0.0
 
 # Economia / startup (economia unica compartilhada)
 var _bag := 1
@@ -95,6 +111,9 @@ const TIPS := [
 	"Separar o lixo certo e o primeiro passo da economia circular.",
 	"Pilhas e eletronicos (e-lixo) exigem descarte especial.",
 	"Reciclar plastico ajuda a reduzir a poluicao dos oceanos.",
+	"Um unico item na lixeira errada pode contaminar um lote inteiro de reciclaveis.",
+	"Espelho nao e reciclado junto com o vidro de garrafas e potes.",
+	"Cupom fiscal e papel termico: nao recicla, vai no rejeito.",
 ]
 
 # --- HUD ------------------------------------------------------------------ #
@@ -104,6 +123,17 @@ var _coins_label: Label
 var _passive_label: Label
 var _progress_label: Label
 var _bag_label: Label
+var _hand_label: Label
+var _slots_row: HBoxContainer
+var _slot_buttons: Array = []
+var _slot_style_on: StyleBoxFlat
+var _slot_style_off: StyleBoxFlat
+var _license_row: HBoxContainer
+var _license_leaves: Array = []
+var _fail_layer: CanvasLayer
+var _fail_panel: PanelContainer
+var _fail_sub: Label
+var _fail_list: VBoxContainer
 var _combo_label: Label
 var _sustain_bar: ProgressBar
 var feedback_label: Label
@@ -147,6 +177,7 @@ func _ready() -> void:
 	_create_pause_menu()
 	_create_guide()
 	_create_minimap()
+	_create_fail_screen()
 	_create_sacola_area()
 	_setup_phase()
 	Audio.start_music()
@@ -157,6 +188,8 @@ func _process(delta: float) -> void:
 	_accrue_passive(delta)
 	if _touch_controls != null and is_instance_valid(player):
 		player.touch_direction = _touch_controls.direction
+	_discard_cd = maxf(0.0, _discard_cd - delta)
+	_update_near_bin()
 	if _phase_complete or _shop_open or _paused or _guide_open or _minimap_open:
 		return
 	_process_belt(delta)
@@ -183,6 +216,7 @@ func _accrue_passive(delta: float) -> void:
 		var add := int(_passive_accum)
 		_passive_accum -= float(add)
 		coins += add
+		_attempt_passive += add
 		_update_hud()
 	_passive_save_cd -= delta
 	if _passive_save_cd <= 0.0:
@@ -275,13 +309,57 @@ func _bld(x: float, y: float, w: float, h: float, palette: Dictionary) -> Dictio
 func _waste_kinds() -> Array:
 	# Cores no padrao CONAMA da coleta seletiva.
 	return [
-		{"type": "plastic", "name": "plastico", "color": Color("#e0483a"), "value": 10},
-		{"type": "paper", "name": "papel", "color": Color("#2b6fd6"), "value": 10},
-		{"type": "glass", "name": "vidro", "color": Color("#3faf4e"), "value": 10},
-		{"type": "metal", "name": "metal", "color": Color("#f2c531"), "value": 10},
-		{"type": "organic", "name": "organico", "color": Color("#6b4a2b"), "value": 10},
-		{"type": "reject", "name": "rejeito", "color": Color("#6f6f6f"), "value": 8},
+		{"type": "plastic", "name": "plastico", "color_name": "VERMELHA", "color": Color("#e0483a"), "value": 10},
+		{"type": "paper", "name": "papel", "color_name": "AZUL", "color": Color("#2b6fd6"), "value": 10},
+		{"type": "glass", "name": "vidro", "color_name": "VERDE", "color": Color("#3faf4e"), "value": 10},
+		{"type": "metal", "name": "metal", "color_name": "AMARELA", "color": Color("#f2c531"), "value": 10},
+		{"type": "organic", "name": "organico", "color_name": "MARROM", "color": Color("#6b4a2b"), "value": 10},
+		{"type": "reject", "name": "rejeito", "color_name": "CINZA", "color": Color("#6f6f6f"), "value": 8},
 	]
+
+
+func _kind_of(waste_type: String) -> Dictionary:
+	for kind in _waste_kinds():
+		if kind["type"] == waste_type:
+			return kind
+	return _waste_kinds()[0]
+
+
+# Residuos com aparencia neutra: o jogador tem que reconhecer o objeto, nao
+# casar cor com cor. "min_phase" libera as pegadinhas a partir da Fase 2;
+# "why" explica a regra quando o jogador erra. Cor = cor real (faiscas/esteira).
+func _waste_catalog() -> Array:
+	return [
+		{"id": "pet", "name": "garrafa PET", "type": "plastic", "color": Color("#cfeaf5"), "why": "PET e um tipo de plastico"},
+		{"id": "sacola", "name": "sacola plastica", "type": "plastic", "color": Color("#f7f7f2"), "why": "sacolas sao feitas de plastico"},
+		{"id": "jornal", "name": "jornal", "type": "paper", "color": Color("#f4f1e8"), "why": "jornal e papel limpo e seco"},
+		{"id": "caixa", "name": "caixa de papelao", "type": "paper", "color": Color("#d6a565"), "why": "papelao limpo e seco vai no papel"},
+		{"id": "garrafa_vidro", "name": "garrafa de vidro", "type": "glass", "color": Color("#b8742c"), "why": "garrafas de vidro voltam a ser vidro"},
+		{"id": "pote_vidro", "name": "pote de vidro", "type": "glass", "color": Color("#cfeee8"), "why": "potes de vidro vao no vidro"},
+		{"id": "lata", "name": "lata de refrigerante", "type": "metal", "color": Color("#c8ccd0"), "why": "latinhas sao de aluminio, um metal"},
+		{"id": "lata_conserva", "name": "lata de conserva", "type": "metal", "color": Color("#c8ccd0"), "why": "lata de conserva e de aco, um metal"},
+		{"id": "banana", "name": "casca de banana", "type": "organic", "color": Color("#f2d23a"), "why": "cascas e restos de comida sao organicos"},
+		{"id": "maca", "name": "resto de maca", "type": "organic", "color": Color("#d8453a"), "why": "restos de comida sao organicos"},
+		{"id": "guardanapo", "name": "guardanapo sujo", "type": "reject", "color": Color("#f7f4ee"), "why": "papel sujo nao recicla"},
+		{"id": "esponja", "name": "esponja de cozinha", "type": "reject", "color": Color("#f2d23a"), "why": "esponja de cozinha nao e reciclavel"},
+		# Pegadinhas (parecem papel/vidro, mas vao no rejeito).
+		{"id": "pizza", "name": "caixa de pizza engordurada", "type": "reject", "color": Color("#d6a565"), "min_phase": 1, "why": "papelao engordurado nao recicla"},
+		{"id": "espelho", "name": "espelho quebrado", "type": "reject", "color": Color("#cfe6f0"), "min_phase": 1, "why": "espelho nao e reciclado com o vidro comum"},
+		{"id": "cupom", "name": "cupom fiscal", "type": "reject", "color": Color("#fbfaf4"), "min_phase": 1, "why": "cupom fiscal e papel termico, que nao recicla"},
+	]
+
+
+func _pick_waste(waste_type: String) -> Dictionary:
+	var options: Array = []
+	for entry in _waste_catalog():
+		if entry["type"] == waste_type and phase_index >= int(entry.get("min_phase", 0)):
+			options.append(entry)
+	var chosen: Dictionary = options[randi() % options.size()]
+	return {
+		"id": chosen["id"], "name": chosen["name"], "type": waste_type,
+		"color": chosen["color"], "value": int(_kind_of(waste_type)["value"]),
+		"why": chosen["why"],
+	}
 
 
 func _make_bins() -> Array:
@@ -328,13 +406,15 @@ func _scatter_waste(count: int) -> Array:
 			continue
 
 		var kind: Dictionary = kinds[result.size() % kinds.size()]
-		var item := {"position": p, "type": kind["type"], "name": kind["name"], "color": kind["color"], "value": kind["value"]}
+		var item := _pick_waste(kind["type"])
 		# E-lixo raro: descarte no rejeito, vale mais.
 		if phase_index >= 1 and randf() < 0.12:
-			item["type"] = "reject"
-			item["name"] = "e-lixo"
-			item["color"] = Color("#9b59b6")
-			item["value"] = 30
+			item = {
+				"id": "pilha", "name": "pilha usada", "type": "reject",
+				"color": Color("#9b59b6"), "value": 30,
+				"why": "pilha e e-lixo: no jogo vai no rejeito (na vida real, leve a um ponto de coleta)",
+			}
+		item["position"] = p
 		result.append(item)
 	return result
 
@@ -402,8 +482,16 @@ func _setup_phase() -> void:
 	sustainability = 0
 	_phase_complete = false
 	_inventory = []
+	_hand = 0
 	_sacola = []
 	_belt_items = []
+
+	# Nova tentativa do bairro: zera a licenca e guarda o ponto de retorno.
+	_strikes = 0
+	_mistakes = []
+	_game_over = false
+	_attempt_start = {"coins": coins, "bag": _bag, "shoe": _shoe}
+	_attempt_passive = 0
 
 	_create_world_collisions()
 	_spawn_recycle_bins()
@@ -411,16 +499,24 @@ func _setup_phase() -> void:
 	_spawn_player()
 	_spawn_collector()
 
-	feedback_label.text = "Colete o lixo e separe na lixeira certa (cores CONAMA). Tecla G: guia."
+	if _license_active():
+		feedback_label.text = "Licenca Ambiental: %d descartes errados e o bairro fica contaminado! Pegue o lixo, escolha o item (%s) e descarte perto da lixeira certa (%s)." % [
+			MAX_STRIKES, _ctl("Q", "Trocar"), _ctl("E", "Descartar")]
+	else:
+		feedback_label.text = "Colete o lixo e separe na lixeira certa (cores CONAMA). %s: guia." % _ctl("Tecla G", "Botao Guia")
 	_update_hud()
 	_update_sacola_label()
 	queue_redraw()
+	# Reativa o jogo (inclusive os controles de toque, escondidos na troca de fase).
+	_set_gameplay_active(true)
 
 
 func _clear_phase_nodes() -> void:
 	if _collector_node != null and is_instance_valid(_collector_node):
 		_collector_node.free()
 	_collector_node = null
+	_bins = []
+	_near_bin = null
 	for node_name in ["WorldCollisions", "RecycleBins", "WasteItems"]:
 		var node := get_node_or_null(node_name)
 		if node != null:
@@ -457,6 +553,8 @@ func _spawn_waste_items() -> void:
 		waste_item.display_name = waste_data["name"]
 		waste_item.display_color = waste_data["color"]
 		waste_item.value = waste_data["value"]
+		waste_item.sprite_id = waste_data.get("id", "")
+		waste_item.why = waste_data.get("why", "")
 		waste_item.picked_up.connect(_on_waste_item_picked_up)
 		waste_root.add_child(waste_item)
 
@@ -466,14 +564,15 @@ func _spawn_recycle_bins() -> void:
 	bin_root.name = "RecycleBins"
 	add_child(bin_root)
 
+	_bins = []
 	for bin in _bin_data:
 		var recycle_bin := RECYCLE_BIN_SCENE.instantiate()
 		recycle_bin.position = bin["position"]
 		recycle_bin.bin_type = bin["type"]
 		recycle_bin.display_name = bin["name"]
 		recycle_bin.display_color = bin["color"]
-		recycle_bin.discard_requested.connect(_on_discard_requested)
 		bin_root.add_child(recycle_bin)
+		_bins.append(recycle_bin)
 
 
 func _spawn_collector() -> void:
@@ -563,10 +662,7 @@ func _on_waste_item_picked_up(waste_item: Node) -> void:
 		feedback_label.text = "Bolsa cheia (%d/%d). Leve ate as lixeiras do centro." % [_inventory.size(), _bag]
 		return
 
-	_inventory.append({
-		"type": waste_item.get("waste_type"), "name": waste_item.get("display_name"),
-		"color": waste_item.get("display_color"), "value": int(waste_item.get("value")),
-	})
+	_inventory.append(waste_item.call("to_item"))
 	feedback_label.text = "Coletado: %s. Bolsa: %d/%d." % [waste_item.get("display_name"), _inventory.size(), _bag]
 	Audio.play("pickup")
 	_spawn_sparkle(waste_item.position, waste_item.get("display_color"))
@@ -590,54 +686,217 @@ func _on_sacola_body_entered(body: Node2D) -> void:
 		_update_sacola_label()
 
 
-func _on_discard_requested(recycle_bin: Node) -> void:
-	if _phase_complete:
-		return
-	var bin_type: String = recycle_bin.get("bin_type")
-	var bin_name: String = recycle_bin.get("display_name")
-	var bin_pos: Vector2 = recycle_bin.position
+## Fases 1 e 2: o gato ainda nao fundou a startup e esta tirando a licenca.
+func _license_active() -> bool:
+	return phase_index < AUTO_UNLOCK_PHASE
 
+
+## Texto de controle certo para a plataforma (teclado x botoes de toque).
+func _ctl(keys: String, touch: String) -> String:
+	return touch if _touch_controls != null else keys
+
+
+func _cap(text: String) -> String:
+	return text.substr(0, 1).to_upper() + text.substr(1)
+
+
+func _can_play() -> bool:
+	return is_instance_valid(player) and not (_phase_complete or _shop_open or _paused or _guide_open or _minimap_open)
+
+
+# Destaca a lixeira em que o gato esta encostado (a mais proxima, se forem duas).
+func _update_near_bin() -> void:
+	var best: Node = null
+	if _can_play():
+		var best_d := INF
+		for bin in _bins:
+			if not is_instance_valid(bin) or not bin.overlaps_body(player):
+				continue
+			var d: float = player.position.distance_squared_to(bin.position + BIN_CENTER)
+			if d < best_d:
+				best_d = d
+				best = bin
+	if best == _near_bin:
+		return
+	if _near_bin != null and is_instance_valid(_near_bin):
+		_near_bin.call("set_focus", false, "")
+	_near_bin = best
+	if best != null:
+		best.call("set_focus", true, _ctl("E: descartar", "Descartar"))
+
+
+func _select_hand(index: int) -> void:
+	if not _can_play() or index < 0 or index >= _inventory.size():
+		return
+	_hand = index
+	feedback_label.text = "Na mao: %s." % _inventory[_hand]["name"]
+	_update_hud()
+
+
+func _cycle_hand(step: int) -> void:
+	if not _can_play():
+		return
 	if _inventory.is_empty():
-		feedback_label.text = "Colete um residuo antes de usar a lixeira de %s." % bin_name
+		feedback_label.text = "Colete residuos para escolher qual descartar."
 		return
+	if _inventory.size() == 1:
+		feedback_label.text = "So ha um item na bolsa: %s." % _inventory[0]["name"]
+		return
+	_select_hand(posmod(_hand + step, _inventory.size()))
 
-	var discarded := 0
-	var earned := 0
-	var kept: Array = []
-	for item in _inventory:
-		if item["type"] == bin_type:
-			_combo += 1
-			var mult := clampf(1.0 + 0.15 * float(_combo - 1), 1.0, 2.5)
-			var award := int(round(float(item["value"]) * mult))
-			coins += award
-			earned += award
-			sustainability = mini(100, sustainability + CORRECT_DISCARD_SUSTAINABILITY)
-			_correct_discards += 1
-			discarded += 1
-		else:
-			kept.append(item)
-	_inventory = kept
 
-	if discarded > 0:
-		_spawn_popup(bin_pos + Vector2(0, -40), "+%d" % earned, Color("#2c451f"))
-		_spawn_sparkle(bin_pos, recycle_bin.get("display_color"))
-		recycle_bin.call("react")
-		_punch_label(_coins_label)
-		Audio.play("correct")
-		var combo_txt := ""
-		if _combo >= 2:
-			combo_txt = "  Combo x%d!" % _combo
-			_punch_label(_combo_label)
-		feedback_label.text = "Correto! %d na lixeira de %s. +%d moedas%s" % [discarded, bin_name, earned, combo_txt]
+# O gato descarta o item NA MAO na lixeira em que esta encostado. Se a lixeira
+# for errada, o item contamina a lixeira (o gato o tira de volta) e, nas Fases
+# 1 e 2, gasta uma chance da Licenca Ambiental.
+func _try_discard() -> void:
+	if not _can_play() or _discard_cd > 0.0:
+		return
+	_update_near_bin()  # usa a posicao atual do gato, nao a do frame anterior
+	if _near_bin == null or not is_instance_valid(_near_bin):
+		feedback_label.text = "Chegue perto de uma lixeira para descartar."
+		return
+	if _inventory.is_empty():
+		feedback_label.text = "Sua bolsa esta vazia. Colete um residuo primeiro."
+		return
+	_discard_cd = DISCARD_COOLDOWN
+	_hand = clampi(_hand, 0, _inventory.size() - 1)
+	var item: Dictionary = _inventory[_hand]
+	if item["type"] == _near_bin.get("bin_type"):
+		_discard_correct(item, _near_bin)
 	else:
-		_combo = 0
-		sustainability = maxi(0, sustainability - WRONG_DISCARD_SUSTAINABILITY_LOSS)
-		Audio.play("wrong")
-		feedback_label.text = "Nada da sua bolsa vai na lixeira de %s. Combo perdido." % bin_name
+		_discard_wrong(item, _near_bin)
+
+
+func _discard_correct(item: Dictionary, bin: Node) -> void:
+	_inventory.remove_at(_hand)
+	_hand = clampi(_hand, 0, maxi(0, _inventory.size() - 1))
+	_combo += 1
+	var mult := clampf(1.0 + 0.15 * float(_combo - 1), 1.0, 2.5)
+	var award := int(round(float(item["value"]) * mult))
+	coins += award
+	sustainability = mini(100, sustainability + CORRECT_DISCARD_SUSTAINABILITY)
+	_correct_discards += 1
+
+	var bin_pos: Vector2 = bin.position
+	_spawn_popup(bin_pos + Vector2(0, -40), "+%d" % award, Color("#2c451f"))
+	_spawn_sparkle(bin_pos + BIN_CENTER, bin.get("display_color"))
+	bin.call("react")
+	_punch_label(_coins_label)
+	Audio.play("correct")
+	var combo_txt := ""
+	if _combo >= 2:
+		combo_txt = "  Combo x%d!" % _combo
+		_punch_label(_combo_label)
+	feedback_label.text = "Certo! %s na lixeira de %s. +%d moedas%s" % [_cap(item["name"]), bin.get("display_name"), award, combo_txt]
 
 	_update_hud()
 	_save()
 	_check_phase_complete()
+
+
+func _discard_wrong(item: Dictionary, bin: Node) -> void:
+	_combo = 0
+	sustainability = maxi(0, sustainability - WRONG_DISCARD_SUSTAINABILITY_LOSS)
+	bin.call("reject")
+	Audio.play("wrong")
+
+	var right := _kind_of(item["type"])
+	var lesson := "%s vai na lixeira %s (%s)" % [_cap(item["name"]), right["color_name"], right["name"]]
+	if String(item.get("why", "")) != "":
+		lesson += ": " + String(item["why"])
+	var bin_pos: Vector2 = bin.position
+
+	if not _license_active():
+		_spawn_popup(bin_pos + Vector2(-20, -40), "Errado!", Color("#b0302a"))
+		feedback_label.text = "Errado! %s. Combo perdido." % lesson
+		_update_hud()
+		return
+
+	_strikes += 1
+	_mistakes.append({"item": item, "bin_type": bin.get("bin_type")})
+	var left := MAX_STRIKES - _strikes
+	_spawn_popup(bin_pos + Vector2(-34, -40), "-1 licenca", Color("#b0302a"))
+	feedback_label.text = "Errado! %s. Chances da licenca: %d/%d." % [lesson, left, MAX_STRIKES]
+	_update_hud()
+	if left >= 0 and left < _license_leaves.size():
+		_punch_label(_license_leaves[left])
+	if _strikes >= MAX_STRIKES:
+		_on_license_lost()
+
+
+# Terceira contaminacao: licenca negada. A fase trava ja, a tela aparece logo
+# depois (para o jogador ver a lixeira tremer) e o bairro recomeca do zero.
+func _on_license_lost() -> void:
+	_game_over = true
+	_phase_complete = true  # trava coleta, descarte e menus enquanto a tela esta aberta
+	_set_gameplay_active(false)
+	# Moedas e compras voltam ao inicio do bairro (a renda passiva recebida fica).
+	coins = int(_attempt_start.get("coins", coins)) + _attempt_passive
+	_bag = int(_attempt_start.get("bag", _bag))
+	_shoe = int(_attempt_start.get("shoe", _shoe))
+	_inventory = []
+	_save()
+	get_tree().create_timer(0.8).timeout.connect(_show_fail_screen)
+
+
+func _show_fail_screen() -> void:
+	if not _game_over:
+		return
+	_update_hud()
+	Audio.play("fail")
+	_fail_sub.text = "O bairro %s ficou contaminado: %d residuos foram parar na lixeira errada." % [_phase_name, _mistakes.size()]
+	for child in _fail_list.get_children():
+		child.queue_free()
+	# Agrupa erros repetidos (mesmo residuo na mesma lixeira errada).
+	var grouped: Array = []
+	for mistake in _mistakes:
+		var found := false
+		for g in grouped:
+			if g["item"]["id"] == mistake["item"]["id"] and g["bin_type"] == mistake["bin_type"]:
+				g["count"] += 1
+				found = true
+				break
+		if not found:
+			grouped.append({"item": mistake["item"], "bin_type": mistake["bin_type"], "count": 1})
+	for mistake in grouped:
+		var item: Dictionary = mistake["item"]
+		var right := _kind_of(item["type"])
+		var wrong := _kind_of(mistake["bin_type"])
+		var times := "" if mistake["count"] == 1 else " (%dx)" % mistake["count"]
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		var icon := TextureRect.new()
+		icon.texture = _Sprites.waste_icon(String(item.get("id", "")))
+		icon.custom_minimum_size = Vector2(40, 40)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(icon)
+		var text := _hud_label(19, Color("#33502f"))
+		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		text.custom_minimum_size = Vector2(700, 0)
+		text.text = "%s%s: voce jogou na lixeira %s (%s). O certo e a %s (%s): %s." % [
+			_cap(item["name"]), times, wrong["color_name"], wrong["name"],
+			right["color_name"], right["name"], item.get("why", "")]
+		row.add_child(text)
+		_fail_list.add_child(row)
+	_fail_layer.visible = true
+	_fail_panel.modulate.a = 0.0
+	create_tween().tween_property(_fail_panel, "modulate:a", 1.0, 0.35)
+
+
+func _retry_phase() -> void:
+	if not _game_over:
+		return
+	_fail_layer.visible = false
+	await _fade_to_black()
+	_clear_phase_nodes()
+	_setup_phase()
+	_fade_in()
+
+
+func _fail_to_menu() -> void:
+	_game_over = false
+	_go_to_menu()
 
 
 func _on_collector_deposited(item: Dictionary) -> void:
@@ -740,7 +999,7 @@ func _spawn_sparkle(world_pos: Vector2, color: Color) -> void:
 	get_tree().create_timer(1.2).timeout.connect(p.queue_free)
 
 
-func _punch_label(label: Label) -> void:
+func _punch_label(label: Control) -> void:
 	if label == null:
 		return
 	label.pivot_offset = label.size * 0.5
@@ -771,6 +1030,23 @@ func _create_hud() -> void:
 
 	_phase_label = _hud_label(23, Color("#2c451f"))
 	column.add_child(_phase_label)
+
+	# Licenca Ambiental (so nas Fases 1 e 2): uma folha por chance.
+	_license_row = HBoxContainer.new()
+	_license_row.add_theme_constant_override("separation", 4)
+	var license_label := _hud_label(19, Color("#2c451f"))
+	license_label.text = "Licenca Ambiental:"
+	_license_row.add_child(license_label)
+	_license_leaves = []
+	for i in MAX_STRIKES:
+		var leaf := TextureRect.new()
+		leaf.texture = _Sprites.leaf()
+		leaf.custom_minimum_size = Vector2(30, 30)
+		leaf.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		leaf.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		_license_row.add_child(leaf)
+		_license_leaves.append(leaf)
+	column.add_child(_license_row)
 	_coins_label = _hud_label(20, Color("#3c513a"))
 	column.add_child(_coins_label)
 	_passive_label = _hud_label(18, Color("#3a6a8a"))
@@ -789,6 +1065,29 @@ func _create_hud() -> void:
 	column.add_child(_progress_label)
 	_bag_label = _hud_label(20, Color("#3c513a"))
 	column.add_child(_bag_label)
+
+	# Bolsa: um espaco por item; o destacado e o item "na mao" (clique/toque escolhe).
+	_slot_style_on = _slot_style(true)
+	_slot_style_off = _slot_style(false)
+	_slots_row = HBoxContainer.new()
+	_slots_row.add_theme_constant_override("separation", 6)
+	column.add_child(_slots_row)
+	_slot_buttons = []
+	for i in MAX_BAG:
+		var slot := Button.new()
+		slot.focus_mode = Control.FOCUS_NONE
+		slot.custom_minimum_size = Vector2(54, 54)
+		slot.expand_icon = true
+		slot.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		slot.pressed.connect(_select_hand.bind(i))
+		_slots_row.add_child(slot)
+		_slot_buttons.append(slot)
+
+	_hand_label = _hud_label(18, Color("#7a3b00"))
+	_hand_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hand_label.custom_minimum_size = Vector2(418, 0)
+	column.add_child(_hand_label)
+
 	_combo_label = _hud_label(20, Color("#c8781f"))
 	column.add_child(_combo_label)
 
@@ -799,6 +1098,8 @@ func _create_hud() -> void:
 
 	var shop_button := Button.new()
 	shop_button.text = "Startup / Loja (L)"
+	# Sem foco: senao a Espaco (descartar) "apertaria" este botao depois de um clique.
+	shop_button.focus_mode = Control.FOCUS_NONE
 	shop_button.custom_minimum_size = Vector2(0, 44)
 	shop_button.add_theme_font_size_override("font_size", 22)
 	shop_button.add_theme_color_override("font_color", Color("#2c451f"))
@@ -809,14 +1110,14 @@ func _create_hud() -> void:
 	column.add_child(shop_button)
 
 	_hint_label = _hud_label(16, Color("#20301f"))
-	_hint_label.text = "WASD: mover  •  L: Startup  •  G: Guia  •  M: Mapa  •  ESC: Pausa"
+	_hint_label.text = "WASD: mover  •  E: descartar  •  Q / 1-6: escolher item  •  L: Startup  •  G: Guia  •  M: Mapa  •  ESC: Pausa"
 	_hint_label.add_theme_color_override("font_shadow_color", Color(1, 1, 1, 0.7))
 	_hint_label.add_theme_constant_override("shadow_offset_x", 1)
 	_hint_label.add_theme_constant_override("shadow_offset_y", 1)
 	# Ancorado no rodape: em tela de celular o viewport e bem mais alto que 1000.
 	_hint_label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	_hint_label.offset_left = 24
-	_hint_label.offset_right = 924
+	_hint_label.offset_right = 1124
 	_hint_label.offset_top = -44
 	_hint_label.offset_bottom = -16
 	_hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -848,6 +1149,8 @@ func _create_touch_controls() -> void:
 	_touch_controls.connect("guide_pressed", _toggle_guide)
 	_touch_controls.connect("map_pressed", _toggle_minimap)
 	_touch_controls.connect("pause_pressed", _touch_pause)
+	_touch_controls.connect("discard_pressed", _try_discard)
+	_touch_controls.connect("swap_pressed", _cycle_hand.bind(1))
 
 	# Sem teclado a dica de teclas so atrapalha (e fica embaixo do manche).
 	if _hint_label != null:
@@ -884,6 +1187,16 @@ func _panel_style() -> StyleBoxFlat:
 	style.shadow_color = Color(0, 0, 0, 0.15)
 	style.shadow_size = 10
 	style.shadow_offset = Vector2(0, 4)
+	return style
+
+
+func _slot_style(selected: bool) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("#fff1cf") if selected else Color(1, 1, 1, 0.55)
+	style.set_corner_radius_all(10)
+	style.border_color = Color("#e08a1f") if selected else Color("#9fbf86")
+	style.set_border_width_all(4 if selected else 2)
+	style.set_content_margin_all(5)
 	return style
 
 
@@ -999,21 +1312,43 @@ func _update_hud() -> void:
 		_passive_label.text = "Renda passiva: +%.1f/s" % rate
 	else:
 		_passive_label.text = ""
+	# Linhas vazias somem: o HUD fica mais baixo (no celular o manche fica embaixo dele).
+	_passive_label.visible = rate > 0.0
 	_sustain_bar.value = sustainability
 	_progress_label.text = "Reciclados: %d / %d" % [_correct_discards, _total_items]
 
-	var carried := ""
-	if not _inventory.is_empty():
-		var names := PackedStringArray()
-		for item in _inventory:
-			names.append(String(item["name"]))
-		carried = "  (" + ", ".join(names) + ")"
-	_bag_label.text = "Bolsa: %d/%d%s" % [_inventory.size(), _bag, carried]
+	# Licenca Ambiental: folhas apagadas = chances ja gastas.
+	_license_row.visible = _license_active()
+	for i in _license_leaves.size():
+		var leaf: TextureRect = _license_leaves[i]
+		leaf.modulate = Color(1, 1, 1) if i < MAX_STRIKES - _strikes else Color(0.42, 0.33, 0.25, 0.45)
+
+	_bag_label.text = "Bolsa: %d/%d" % [_inventory.size(), _bag]
+	_hand = clampi(_hand, 0, maxi(0, _inventory.size() - 1))
+	for i in _slot_buttons.size():
+		var slot: Button = _slot_buttons[i]
+		slot.visible = i < _bag
+		var filled := i < _inventory.size()
+		slot.disabled = not filled
+		if filled:
+			slot.icon = _Sprites.waste_icon(String(_inventory[i].get("id", "")))
+			slot.tooltip_text = "%d: %s" % [i + 1, _inventory[i]["name"]]
+		else:
+			slot.icon = null
+			slot.tooltip_text = ""
+		var style := _slot_style_on if filled and i == _hand else _slot_style_off
+		for state in ["normal", "hover", "pressed", "disabled"]:
+			slot.add_theme_stylebox_override(state, style)
+	if _inventory.is_empty():
+		_hand_label.text = "Bolsa vazia: encoste no lixo para coletar."
+	else:
+		_hand_label.text = "Na mao: %s" % _inventory[_hand]["name"]
 
 	if _combo >= 2:
 		_combo_label.text = "Combo x%d" % _combo
 	else:
 		_combo_label.text = ""
+	_combo_label.visible = _combo >= 2
 
 
 # --------------------------------------------------------------------------- #
@@ -1407,12 +1742,12 @@ func _create_guide() -> void:
 	column.add_child(title)
 
 	var lines := [
-		[Color("#2b6fd6"), "Papel (azul): jornais, caixas, cadernos"],
-		[Color("#e0483a"), "Plastico (vermelho): garrafas, sacos, embalagens"],
-		[Color("#3faf4e"), "Vidro (verde): garrafas, potes"],
-		[Color("#f2c531"), "Metal (amarelo): latas, tampas"],
-		[Color("#6b4a2b"), "Organico (marrom): restos de comida, cascas"],
-		[Color("#6f6f6f"), "Rejeito (cinza): nao reciclavel, e-lixo, engordurados"],
+		[Color("#2b6fd6"), "Papel (azul): jornal, caixa de papelao limpa, folhas"],
+		[Color("#e0483a"), "Plastico (vermelho): garrafa PET, sacolas, embalagens"],
+		[Color("#3faf4e"), "Vidro (verde): garrafas e potes de vidro"],
+		[Color("#f2c531"), "Metal (amarelo): latinhas, latas de conserva"],
+		[Color("#6b4a2b"), "Organico (marrom): cascas e restos de comida"],
+		[Color("#6f6f6f"), "Rejeito (cinza): guardanapo sujo, esponja, caixa de pizza engordurada, espelho, cupom fiscal, pilhas"],
 	]
 	for line in lines:
 		var row := HBoxContainer.new()
@@ -1420,13 +1755,33 @@ func _create_guide() -> void:
 		var swatch := ColorRect.new()
 		swatch.color = line[0]
 		swatch.custom_minimum_size = Vector2(30, 30)
+		swatch.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		row.add_child(swatch)
 		var label := Label.new()
 		label.text = line[1]
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.custom_minimum_size = Vector2(760, 0)
 		label.add_theme_font_size_override("font_size", 22)
 		label.add_theme_color_override("font_color", Color("#33502f"))
 		row.add_child(label)
 		column.add_child(row)
+
+	var rules := Label.new()
+	rules.text = "Fases 1 e 2 (Licenca Ambiental): %d descartes na lixeira errada e o bairro fica contaminado. A fase recomeca." % MAX_STRIKES
+	rules.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	rules.custom_minimum_size = Vector2(802, 0)
+	rules.add_theme_font_size_override("font_size", 20)
+	rules.add_theme_color_override("font_color", Color("#a8322a"))
+	column.add_child(rules)
+
+	var controls := Label.new()
+	controls.text = _ctl("E ou Espaco: descartar o item na mao  •  Q, Tab ou 1-6: escolher o item",
+		"Descartar: joga o item na mao na lixeira  •  Trocar (ou toque na bolsa): escolhe o item")
+	controls.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	controls.custom_minimum_size = Vector2(802, 0)
+	controls.add_theme_font_size_override("font_size", 19)
+	controls.add_theme_color_override("font_color", Color("#33502f"))
+	column.add_child(controls)
 
 	var hint := Label.new()
 	hint.text = "Tecla G ou ESC para fechar"
@@ -1446,6 +1801,73 @@ func _create_guide() -> void:
 	close_button.add_theme_stylebox_override("pressed", _button_style(Color("#d0b478")))
 	close_button.pressed.connect(_close_guide)
 	column.add_child(close_button)
+
+
+func _create_fail_screen() -> void:
+	_fail_layer = CanvasLayer.new()
+	_fail_layer.name = "LicenseFail"
+	_fail_layer.layer = 6
+	_fail_layer.visible = false
+	add_child(_fail_layer)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0.14, 0.03, 0.0, 0.66)
+	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fail_layer.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fail_layer.add_child(center)
+
+	_fail_panel = PanelContainer.new()
+	var style := _banner_style()
+	style.border_color = Color("#c0583a")
+	_fail_panel.add_theme_stylebox_override("panel", style)
+	center.add_child(_fail_panel)
+
+	var column := VBoxContainer.new()
+	column.add_theme_constant_override("separation", 12)
+	_fail_panel.add_child(column)
+
+	var title := Label.new()
+	title.text = "Licenca negada!"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 54)
+	title.add_theme_color_override("font_color", Color("#a8322a"))
+	column.add_child(title)
+
+	_fail_sub = _hud_label(24, Color("#4a5d3f"))
+	_fail_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_fail_sub.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_fail_sub.custom_minimum_size = Vector2(760, 0)
+	column.add_child(_fail_sub)
+
+	var fact := _hud_label(19, Color("#6f8a5a"))
+	fact.text = "Na vida real, um unico item na lixeira errada pode contaminar um lote inteiro de reciclaveis."
+	fact.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	fact.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	fact.custom_minimum_size = Vector2(760, 0)
+	column.add_child(fact)
+
+	var list_title := _hud_label(22, Color("#2c451f"))
+	list_title.text = "Onde voce errou:"
+	column.add_child(list_title)
+
+	_fail_list = VBoxContainer.new()
+	_fail_list.add_theme_constant_override("separation", 8)
+	column.add_child(_fail_list)
+
+	var note := _hud_label(18, Color("#6f8a5a"))
+	note.text = "O bairro recomeca do zero. Moedas e compras voltam ao que eram no inicio dele."
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	column.add_child(note)
+
+	var buttons := HBoxContainer.new()
+	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 16)
+	column.add_child(buttons)
+	buttons.add_child(_menu_button("Tentar de novo", _retry_phase))
+	buttons.add_child(_menu_button("Menu Principal", _fail_to_menu))
 
 
 func _toggle_guide() -> void:
@@ -1628,8 +2050,13 @@ func _on_phase_complete() -> void:
 		_complete_city()
 		return
 
-	_banner_title.text = "Fase Concluida!"
-	_banner_sub.text = "%s reciclado. Proximo bairro de %s..." % [_phase_name, CITY_NAMES[_city_index]]
+	if phase_index + 1 == AUTO_UNLOCK_PHASE:
+		# Passou pelas fases da licenca: libera a startup.
+		_banner_title.text = "Licenca aprovada!"
+		_banner_sub.text = "Voce provou que sabe separar o lixo. A Startup EcoCat foi liberada na loja!"
+	else:
+		_banner_title.text = "Fase Concluida!"
+		_banner_sub.text = "%s reciclado. Proximo bairro de %s..." % [_phase_name, CITY_NAMES[_city_index]]
 	_banner_tip.text = "Voce sabia? " + TIPS[randi() % TIPS.size()]
 	_show_banner()
 	get_tree().create_timer(3.0).timeout.connect(_advance_phase)
@@ -1733,12 +2160,22 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_L:
+		var key: Key = event.keycode
+		if key == KEY_L:
 			_toggle_shop()
-		elif event.keycode == KEY_G:
+		elif key == KEY_G:
 			_toggle_guide()
-		elif event.keycode == KEY_M:
+		elif key == KEY_M:
 			_toggle_minimap()
+		elif key == KEY_E or key == KEY_SPACE:
+			_try_discard()
+		elif key == KEY_Q or key == KEY_TAB:
+			_cycle_hand(1)
+		elif key >= KEY_1 and key <= KEY_6:
+			_select_hand(key - KEY_1)
+		else:
+			return
+		get_viewport().set_input_as_handled()
 
 
 func _ensure_input_actions() -> void:

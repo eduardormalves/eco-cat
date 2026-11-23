@@ -20,6 +20,7 @@ func _ready() -> void:
 	_sfx["coin"] = _tone([988.0, 1319.0], 0.09, 0.3)
 	_sfx["buy"] = _tone([440.0, 660.0, 880.0], 0.14, 0.35)
 	_sfx["phase"] = _tone([523.0, 659.0, 784.0, 1046.0], 0.5, 0.4)
+	_sfx["fail"] = _tone([392.0, 330.0, 262.0, 196.0], 0.7, 0.4)
 
 	for i in 6:
 		var player := AudioStreamPlayer.new()

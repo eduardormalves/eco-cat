@@ -12,6 +12,8 @@ extends Control
 signal guide_pressed
 signal map_pressed
 signal pause_pressed
+signal discard_pressed
+signal swap_pressed
 
 const STICK_BOX := 640.0
 const STICK_PAD := 56.0
@@ -166,18 +168,39 @@ func _build_buttons() -> void:
 	column.add_child(_action_button("Mapa", func() -> void: map_pressed.emit()))
 	column.add_child(_action_button("Pausa", func() -> void: pause_pressed.emit()))
 
+	# Acoes de jogo (equivalentes a E/Espaco e Q/Tab), ao lado dos atalhos.
+	var play := VBoxContainer.new()
+	play.name = "PlayActions"
+	play.alignment = BoxContainer.ALIGNMENT_END
+	play.add_theme_constant_override("separation", 22)
+	play.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	play.offset_left = -(400.0 + 360.0 + STICK_PAD + 40.0)
+	play.offset_top = -(140.0 + 200.0 + 22.0 + STICK_PAD)
+	play.offset_right = -(400.0 + STICK_PAD + 40.0)
+	play.offset_bottom = -STICK_PAD
+	add_child(play)
 
-func _action_button(text: String, on_press: Callable) -> Button:
+	var swap := _action_button("Trocar", func() -> void: swap_pressed.emit())
+	swap.custom_minimum_size = Vector2(360, 140)
+	play.add_child(swap)
+	var discard := _action_button("Descartar", func() -> void: discard_pressed.emit(), Color("#f2b45a"))
+	discard.custom_minimum_size = Vector2(360, 200)
+	discard.add_theme_font_size_override("font_size", 56)
+	play.add_child(discard)
+
+
+func _action_button(text: String, on_press: Callable, tint := Color("#9fd57e")) -> Button:
 	var button := Button.new()
 	button.text = text
+	button.focus_mode = Control.FOCUS_NONE
 	button.custom_minimum_size = Vector2(400, 140)
 	button.add_theme_font_size_override("font_size", 48)
 	button.add_theme_color_override("font_color", Color("#2c451f"))
 	button.add_theme_color_override("font_hover_color", Color("#1c3014"))
 	button.add_theme_color_override("font_pressed_color", Color("#1c3014"))
-	button.add_theme_stylebox_override("normal", _style(Color("#9fd57e", 0.92)))
-	button.add_theme_stylebox_override("hover", _style(Color("#b6e695", 0.95)))
-	button.add_theme_stylebox_override("pressed", _style(Color("#8ac368", 0.95)))
+	button.add_theme_stylebox_override("normal", _style(Color(tint, 0.92)))
+	button.add_theme_stylebox_override("hover", _style(Color(tint.lightened(0.15), 0.95)))
+	button.add_theme_stylebox_override("pressed", _style(Color(tint.darkened(0.1), 0.95)))
 	button.pressed.connect(on_press)
 	return button
 

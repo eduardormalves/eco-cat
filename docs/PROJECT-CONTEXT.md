@@ -79,7 +79,7 @@ Já existe:
 - moedas por descarte correto
 - sustentabilidade aumentando em acertos e reduzindo levemente em erros
 
-Regra atual de descarte incorreto: o jogador recebe feedback negativo leve e perde um pouco de sustentabilidade, mas mantém o item para tentar novamente na lixeira correta.
+Regra atual de descarte: o jogador escolhe o item "na mão" e descarta apertando E/Espaço (ou o botão Descartar no celular) perto da lixeira; encostar não descarta mais. Um descarte incorreto zera o combo, tira um pouco de sustentabilidade e o item volta para a bolsa. Nas Fases 1 e 2 (antes de fundar a startup) vale a **Licença Ambiental**: 3 descartes errados no mesmo bairro = licença negada, a fase recomeça e moedas/compras voltam ao início dela. Os resíduos aparecem como objetos reais (sem a cor da lixeira) e, a partir da Fase 2, surgem pegadinhas que vão no rejeito.
 
 Próximo passo recomendado: separar inventário/economia em sistemas próprios ou melhorar feedback visual da coleta/descarte.
 
